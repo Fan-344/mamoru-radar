@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f1e3">
+<title>宮古島守護君雷達</title>
+<meta property="og:title" content="宮古島守護君雷達">
+<meta property="og:description" content="全島 21 尊守護君，靠近就會嗶嗶叫。你集到幾尊了？">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css">
+<style>
+  :root{
+    --sand:#f7f1e3;        /* 與那霸前濱的白沙 */
+    --sand-2:#efe4cc;
+    --sea:#1aa7c9;         /* 宮古藍 */
+    --sea-deep:#0d6f8c;
+    --sea-pale:#bfeaf0;
+    --coral:#ff6b57;       /* 珊瑚、扶桑花 */
+    --sun:#f5b83d;         /* 已找到：夕陽金 */
+    --ink:#173a45;
+    --ink-dim:#5f7f88;
+    --danger:#d94a3a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--sand);
+    background-image:linear-gradient(180deg,#fbf7ee 0%,var(--sand) 40%,var(--sand-2) 100%);
+    color:var(--ink);
+    font-family:"Hiragino Sans","PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+    font-size:16px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .wrap{max-width:520px;margin:0 auto;padding:18px 16px 32px}
+
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:14px}
+  h1{margin:0;font-size:22px;font-weight:800;letter-spacing:.02em;line-height:1.1;color:var(--sea-deep)}
+  h1 small{display:block;font-size:12px;font-weight:500;color:var(--ink-dim);margin-top:4px;letter-spacing:.08em}
+  .count{font-variant-numeric:tabular-nums;text-align:right;line-height:1}
+  .count b{font-size:34px;font-weight:800;color:var(--coral)}
+  .count span{display:block;font-size:12px;color:var(--ink-dim);margin-top:4px}
+
+  /* 機身：白色海灘小機器 */
+  .device{
+    background:linear-gradient(160deg,#ffffff,#f3ede0 75%);
+    border-radius:38px;
+    padding:18px 18px 14px;
+    box-shadow:0 18px 40px rgba(13,111,140,.18),inset 0 2px 0 #fff,inset 0 -5px 0 rgba(13,111,140,.10);
+  }
+  .screen{
+    position:relative;width:100%;aspect-ratio:1/1;border-radius:50%;
+    background:var(--sea);
+    box-shadow:inset 0 0 0 6px #fff,inset 0 0 18px rgba(13,111,140,.25),0 0 0 3px var(--sea-pale);
+    overflow:hidden;
+  }
+  #map{position:absolute;inset:0;border-radius:50%;z-index:0;background:#fff}
+  .maplibregl-ctrl,.maplibregl-control-container{display:none}
+  .maplibregl-canvas{outline:none}
+  .screen svg,.sweep,.screen .center,#blips,.screen-text{z-index:1}
+  .screen svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  #blips{position:absolute;inset:0}
+  .sweep{
+    position:absolute;inset:0;border-radius:50%;
+    background:conic-gradient(from 0deg, rgba(13,111,140,.12) 0deg, rgba(13,111,140,.03) 60deg, transparent 120deg);
+    animation:sweep 12s linear infinite;pointer-events:none;
+  }
+  @keyframes sweep{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.sweep{animation:none;opacity:.5}}
+  .screen .center{position:absolute;left:50%;top:50%;width:0;height:0;margin:-13px 0 0 -9px;transform-origin:9px 13px;
+    border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:24px solid #fff;
+    filter:drop-shadow(0 0 1px var(--sea-deep)) drop-shadow(0 0 1px var(--sea-deep)) drop-shadow(0 1px 3px rgba(0,0,0,.45));transition:transform .6s ease-out}
+  .screen .center.nohead{opacity:.55}
+  .blip{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:var(--coral);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transition:left 1.2s ease,top 1.2s ease}
+  .blip.found{background:var(--sun)}
+  .blip.edge{width:0;height:0;border-radius:0;background:none;box-shadow:none;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid var(--coral);margin:-6px 0 0 -6px}
+  .blip.edge.found{border-bottom-color:var(--sun)}
+  .blip.near{box-shadow:0 0 0 7px rgba(255,107,87,.28),0 1px 4px rgba(0,0,0,.35)}
+  .label{position:absolute;font-size:10px;font-weight:700;color:#fff;white-space:nowrap;transform:translate(-50%,10px);pointer-events:none;background:rgba(23,58,69,.75);padding:1px 5px;border-radius:6px}
+  .label.found{color:#ffe7a8}
+  .screen-text{position:absolute;left:0;right:0;text-align:center;font-size:11px;color:var(--sea-deep);font-weight:700;letter-spacing:.1em;pointer-events:none;text-shadow:0 0 4px #fff,0 0 4px #fff}
+  .screen-text.top{top:12px}
+  .screen-text.bottom{bottom:12px}
+
+  .controls{display:flex;gap:8px;margin-top:14px;align-items:center}
+  .range{display:flex;align-items:center;gap:8px;background:var(--sea-pale);border-radius:14px;padding:6px 12px;flex:1}
+  .rlab{font-size:11px;color:var(--sea-deep);font-weight:700;flex:none}
+  input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:30px;background:transparent;margin:0}
+  input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--sea),var(--sea-deep))}
+  input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--sea),var(--sea-deep))}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:#fff;border:3px solid var(--coral);margin-top:-10px;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+  input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid var(--coral);box-shadow:0 2px 6px rgba(0,0,0,.2)}
+  input[type=range]:focus-visible{outline:3px solid var(--coral);outline-offset:2px;border-radius:8px}
+  .power{border:0;border-radius:14px;padding:11px 16px;font-size:14px;font-weight:800;background:var(--coral);color:#fff;box-shadow:0 4px 0 #c94b3a;cursor:pointer}
+  .power:active{transform:translateY(2px);box-shadow:0 2px 0 #c94b3a}
+  .power.on{background:var(--sea-deep);box-shadow:0 4px 0 #084b60}
+  button:focus-visible,a:focus-visible{outline:3px solid var(--coral);outline-offset:2px}
+
+  .status{margin:12px 2px 0;font-size:13px;color:var(--ink-dim);min-height:1.5em}
+  .status.err{color:var(--danger)}
+
+  .nearest[hidden]{display:none}
+  .nearest{margin-top:16px;background:#fff;border-radius:20px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;box-shadow:0 6px 18px rgba(13,111,140,.10)}
+  .nearest .name{font-size:20px;font-weight:800}
+  .nearest .where{font-size:13px;color:var(--ink-dim)}
+  .nearest .dist{font-size:26px;font-weight:800;color:var(--sea-deep);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .nearest .dist small{font-size:13px;color:var(--ink-dim);margin-left:2px}
+
+  h2{font-size:15px;margin:22px 4px 8px;font-weight:700;color:var(--ink-dim)}
+  ul{list-style:none;margin:0;padding:0}
+  li{display:flex;align-items:center;gap:12px;padding:11px 10px;border-radius:14px;background:#fff;margin-bottom:6px;box-shadow:0 2px 8px rgba(13,111,140,.06)}
+  li.found{background:#fff6dc}
+  li .no{width:26px;height:26px;border-radius:50%;background:var(--sea-pale);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--sea-deep);flex:none}
+  li.found .no{background:var(--sun);color:#5a3d00}
+  li .info{flex:1;min-width:0}
+  li .nm{font-weight:700}
+  li .nm .jp{font-weight:500;color:var(--ink-dim);font-size:12px;margin-left:6px}
+  li .pl{font-size:12px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  li .d{font-variant-numeric:tabular-nums;font-size:13px;color:var(--sea-deep);white-space:nowrap}
+  li.found .d{color:#b07a12}
+  li .go{border:0;background:var(--sea-pale);color:var(--sea-deep);border-radius:10px;padding:7px 9px;font-size:13px;text-decoration:none;flex:none;font-weight:700}
+  li .chk{border:0;border-radius:10px;padding:7px 10px;font-size:13px;font-weight:700;background:var(--coral);color:#fff;flex:none;cursor:pointer}
+  li.found .chk{background:var(--sun);color:#5a3d00}
+
+  .share{display:flex;gap:8px;margin-top:18px}
+  .share button{flex:1;border:0;border-radius:14px;padding:12px;font-size:14px;font-weight:700;background:#fff;color:var(--sea-deep);cursor:pointer;box-shadow:0 2px 8px rgba(13,111,140,.08)}
+  .share button.primary{background:var(--sea-deep);color:#fff}
+  .foot{font-size:12px;color:var(--ink-dim);margin-top:14px;line-height:1.6}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--coral);color:#fff;font-weight:800;padding:12px 18px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .3s;max-width:90vw;text-align:center}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>宮古島守護君雷達<small>まもる君レーダー</small></h1>
+    <div class="count"><b id="foundCount">0</b><span>/ 21 已找到</span></div>
+  </header>
+
+  <section class="device" aria-label="雷達">
+    <div class="screen" id="screen">
+      <div id="map" aria-hidden="true"></div>
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <g stroke="rgba(13,111,140,.35)" stroke-width=".5" fill="none">
+          <circle cx="100" cy="100" r="30" opacity=".7"/><circle cx="100" cy="100" r="60"/><circle cx="100" cy="100" r="90"/>
+          <line x1="100" y1="10" x2="100" y2="190"/><line x1="10" y1="100" x2="190" y2="100"/>
+          <line x1="36" y1="36" x2="164" y2="164"/><line x1="164" y1="36" x2="36" y2="164"/>
+        </g>
+        <text x="100" y="22" text-anchor="middle" font-size="9" fill="#0d6f8c" font-weight="700">N</text>
+      </svg>
+      <div class="sweep"></div>
+      <div class="center nohead" id="me" aria-hidden="true"></div>
+      <div id="blips"></div>
+      <div class="screen-text top" id="scaleText">範圍 3 km</div>
+      <div class="screen-text bottom" id="fixText">尚未取得定位</div>
+    </div>
+    <div class="controls">
+      <div class="range">
+        <span class="rlab">0.5</span>
+        <input type="range" id="rangeSlider" min="0" max="100" value="44" step="1" aria-label="雷達範圍（公里）">
+        <span class="rlab">30k</span>
+      </div>
+      <button class="power" id="power">啟動雷達</button>
+    </div>
+    <div class="status" id="status">按「啟動雷達」開始定位，1 公里內開始有泡泡聲，越近越密。</div>
+  </section>
+
+  <section class="nearest" id="nearest" hidden>
+    <div>
+      <div class="name" id="nName">—</div>
+      <div class="where" id="nWhere"></div>
+    </div>
+    <div class="dist" id="nDist">—</div>
+  </section>
+
+  <h2>全部 21 尊（依距離排序）</h2>
+  <ul id="list"></ul>
+
+  <div class="share">
+    <button class="primary" id="shareBtn">分享我的進度</button>
+    <button id="resetBtn">重設</button>
+  </div>
+  <p class="foot">按「找到了」後那尊會從雷達和偵測中移除（名單裡可再按一次取消）。找到的紀錄存在網址裡：把網址加入書籤或分享給同行的人，就能延續進度。座標取自 Google 地圖上各尊的地標，守護君每年可能調動，以現場為準。守護君通常站在交叉路口，停車拍照請注意安全。<br>地圖資料 © OpenStreetMap contributors，圖磚 OpenFreeMap</p>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js"></script>
+<script>
+/* ===== 資料：需要校正座標就改這裡 ===== */
+const STATUES = [ // 座標取自 Google 地圖上各尊的地標
+  {id:1, name:"守護君", jp:"まもる君", place:"宮古島警察署 正門", lat:24.79147, lng:125.29519},
+  {id:2, name:"進君", jp:"すすむ君", place:"狩俣（往池間大橋的直路）", lat:24.86791, lng:125.28934},
+  {id:3, name:"浩二君", jp:"こうじ君", place:"西原入口（西仲宗根）", lat:24.82651, lng:125.29488},
+  {id:4, name:"仁君", jp:"ひとし君", place:"下地川滿（機場南側）", lat:24.76957, lng:125.28704},
+  {id:5, name:"俊夫君", jp:"としお君", place:"東仲宗根 五岔路口", lat:24.80082, lng:125.29566},
+  {id:6, name:"良三君", jp:"りょうぞう君", place:"郡農協前交叉口", lat:24.78720, lng:125.30722},
+  {id:7, name:"正男君", jp:"まさお君", place:"上野德國文化村停車場旁", lat:24.72029, lng:125.32171},
+  {id:8, name:"出君", jp:"いずる君", place:"上野新里", lat:24.72963, lng:125.33898},
+  {id:9, name:"和樹君", jp:"かずき君", place:"下地小學校前", lat:24.74602, lng:125.28310},
+  {id:10, name:"哲也君", jp:"てつや君", place:"與那霸（來間大橋前）", lat:24.73372, lng:125.27514},
+  {id:11, name:"正勝君", jp:"まさかつ君", place:"西城小學校附近路口", lat:24.75661, lng:125.36237},
+  {id:12, name:"清君", jp:"きよし君", place:"伊良部 仲地", lat:24.81942, lng:125.17881},
+  {id:13, name:"淳君", jp:"あつし君", place:"上野小學校前", lat:24.74268, lng:125.33185},
+  {id:14, name:"拓真君", jp:"たくま君", place:"宮古電水前（市區）", lat:24.79046, lng:125.28083},
+  {id:15, name:"淳樹君", jp:"じゅんき君", place:"伊良部 前里添", lat:24.82792, lng:125.19437, approx:true},
+  {id:16, name:"貴也君", jp:"たかや君", place:"池間島 鰹魚公園前", lat:24.92573, lng:125.24591},
+  {id:17, name:"勲君", jp:"いさお君", place:"城邊砂川 大路口", lat:24.75886, lng:125.33421},
+  {id:18, name:"至君", jp:"いたる君", place:"宮古機場 入境大廳", lat:24.77961, lng:125.29773},
+  {id:19, name:"光男君", jp:"みつお君", place:"平良交番前", lat:24.80600, lng:125.28067},
+  {id:20, name:"剛君", jp:"つよし君", place:"多良間島 機場前", lat:24.65491, lng:124.67820},
+  {id:21, name:"丸子醬", jp:"まる子ちゃん", place:"宮古島警察署 正門", lat:24.79146, lng:125.29521},
+];
+const ALERT_M = 300;   // 進入幾公尺內就提示
+const ISLAND = {lat:24.79, lng:125.29};
+
+/* ===== 道路底圖：OpenFreeMap 向量圖磚（免金鑰），只畫海、陸地、道路，沒有任何文字 =====
+   顏色要改就改這幾個 */
+const MAPC={ land:'#ffffff', sea:'#cfe9ee', major:'#0d6f8c', minor:'#8fc3cf' };
+let map=null, mapReady=false;
+try{
+  map=new maplibregl.Map({
+    container:'map', attributionControl:false, interactive:false, fadeDuration:0,
+    center:[ISLAND.lng,ISLAND.lat], zoom:12,
+    style:{
+      version:8,
+      sources:{ omt:{ type:'vector', url:'https://tiles.openfreemap.org/planet' } },
+      layers:[
+        { id:'bg', type:'background', paint:{ 'background-color':MAPC.land } },
+        { id:'water', type:'fill', source:'omt', 'source-layer':'water', paint:{ 'fill-color':MAPC.sea } },
+        { id:'road-minor', type:'line', source:'omt', 'source-layer':'transportation',
+          filter:['in','class','tertiary','minor','service','residential','unclassified'],
+          layout:{ 'line-cap':'round','line-join':'round' },
+          paint:{ 'line-color':MAPC.minor, 'line-width':['interpolate',['linear'],['zoom'],11,.4,14,1.4,17,3.5] } },
+        { id:'road-major', type:'line', source:'omt', 'source-layer':'transportation',
+          filter:['in','class','motorway','trunk','primary','secondary'],
+          layout:{ 'line-cap':'round','line-join':'round' },
+          paint:{ 'line-color':MAPC.major, 'line-width':['interpolate',['linear'],['zoom'],10,1,14,3.5,17,8] } }
+      ]
+    }
+  });
+  map.on('load',()=>{ mapReady=true; fitMap(); render(); });
+}catch(e){ map=null; }
+function zoomFor(km,lat,radPx){ // 讓範圍圈剛好對到雷達邊緣（MapLibre 512px 圖磚）
+  return Math.log2(40075016.686*Math.cos(lat*Math.PI/180)*radPx/(km*1000*512));
+}
+function fitMap(){
+  if(!map) return;
+  const c=me||ISLAND, size=document.getElementById('screen').clientWidth, rad=size/2-14;
+  map.resize();
+  map.jumpTo({center:[c.lng,c.lat], zoom:zoomFor(rangeKm,c.lat,rad)});
+}
+
+/* ===== 狀態 ===== */
+let rangeKm = 3, watching = null, me = null, lastRender = 0;
+let found = new Set(), alerted = new Set(), beepTimer = null;
+
+/* 紀錄同時存在網址（可分享）和手機本機（重新整理、加到主畫面都還在）
+   有網址參數以網址為準，否則讀本機 */
+const STORE_KEY='mamoru-found';
+(function loadFound(){
+  const parse=v=>String(v||'').split(',').forEach(s=>{const n=+s; if(n>=1&&n<=21) found.add(n);});
+  const m=location.hash.match(/found=([0-9,]+)/);
+  if(m) parse(m[1]);
+  else { try{ parse(localStorage.getItem(STORE_KEY)); }catch(e){} }
+})();
+function saveHash(){
+  const v=[...found].sort((a,b)=>a-b).join(',');
+  try{ history.replaceState(null,'', v?('#found='+v):location.pathname); }catch(e){}
+  try{ localStorage.setItem(STORE_KEY,v); }catch(e){}
+  document.getElementById('foundCount').textContent=found.size;
+}
+
+/* ===== 幾何 ===== */
+function distM(a,b){
+  const R=6371000,toR=x=>x*Math.PI/180;
+  const dLat=toR(b.lat-a.lat), dLng=toR(b.lng-a.lng);
+  const s=Math.sin(dLat/2)**2+Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+function bearing(a,b){
+  const toR=x=>x*Math.PI/180;
+  const y=Math.sin(toR(b.lng-a.lng))*Math.cos(toR(b.lat));
+  const x=Math.cos(toR(a.lat))*Math.sin(toR(b.lat))-Math.sin(toR(a.lat))*Math.cos(toR(b.lat))*Math.cos(toR(b.lng-a.lng));
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
+}
+const fmt=m=> m<1000 ? Math.round(m)+' m' : (m/1000).toFixed(m<10000?1:0)+' km';
+
+/* ===== 聲音：用 <audio> 元素播放自製 WAV，iOS 靜音鍵下也能出聲 ===== */
+function makeWav(segs){ // 多段「正弦 + 音高滑動」串起來 = 泡泡聲
+  const sr=11025,n=segs.reduce((t,g)=>t+Math.floor(sr*g[2]),0),buf=new ArrayBuffer(44+n*2),v=new DataView(buf);
+  const w=(o,str)=>{for(let i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));};
+  w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);
+  v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+  let ph=0,i=0;
+  segs.forEach(([f0,f1,dur,env,vol])=>{const m=Math.floor(sr*dur);
+    for(let k=0;k<m;k++,i++){const t=k/sr,f=f0+(f1-f0)*(k/m);ph+=2*Math.PI*f/sr;
+      v.setInt16(44+i*2,Math.sin(ph)*Math.exp(-t*env)*vol*32767,true);}});
+  let b='';const u=new Uint8Array(buf);for(let i=0;i<u.length;i++)b+=String.fromCharCode(u[i]);
+  return 'data:audio/wav;base64,'+btoa(b);
+}
+const TONES={};
+const P=(f0,f1,d=.1,env=28,vol=.8)=>[f0,f1,d,env,vol], G=(d)=>[0,0,d,1,0]; // 泡泡 / 間隔
+const DEFS={ // 全部都是單顆泡泡，只差音高；靠近時靠間隔變密
+  b1:[P(900,450,.16,22,.7)],
+  b2:[P(1050,500,.14,24,.72)],
+  b3:[P(1200,560,.13,26,.75)],
+  b4:[P(1350,620,.12,28,.78)],
+  b5:[P(1500,700,.11,30,.8)],
+  b6:[P(1700,800,.10,32,.82)],
+  found:[P(1500,900,.18,18)],
+};
+Object.entries(DEFS).forEach(([k,d])=>{ const a=new Audio(makeWav(d)); a.preload='auto'; a.setAttribute('playsinline',''); TONES[k]=a; });
+let audioUnlocked=false;
+function unlockAudio(){ // 必須在使用者點擊的當下呼叫
+  if(audioUnlocked) return;
+  Object.values(TONES).forEach(a=>{ a.volume=0; a.play().then(()=>{a.pause();a.currentTime=0;a.volume=1;}).catch(()=>{a.volume=1;}); });
+  audioUnlocked=true;
+}
+function beep(key='pop'){
+  const a=TONES[key]; if(!a) return;
+  try{ if(!a.paused && !a.ended) return; a.currentTime=0; a.play().catch(()=>{}); }catch(e){}
+}
+let alarmTimers=[];
+function alarm(){ // 抵達：只震動，不另外出聲
+  if(navigator.vibrate) navigator.vibrate([200,80,200]);
+}
+function stopAllSound(){
+  clearTimeout(beepTimer); alarmTimers.forEach(clearTimeout); alarmTimers=[];
+  Object.values(TONES).forEach(a=>{ try{ a.pause(); a.currentTime=0; }catch(e){} });
+  if(navigator.vibrate) navigator.vibrate(0);
+}
+const BANDS=[ // [上限公尺, 音檔, 間隔毫秒]，由遠到近
+  [1000,'b1',2500],[700,'b2',1600],[400,'b3',1000],[250,'b4',650],[150,'b5',420],[80,'b6',280]];
+function bandFor(m){ let b=null; for(const x of BANDS){ if(m<=x[0]) b=x; } return b; }
+/* 節拍器：單一計時鏈，GPS 更新只改「目前最近距離」，下一拍才依新距離決定音色與間隔，
+   不會因為定位跳動而重啟、疊音 */
+let nearestNow=null;
+function tick(){
+  if(!watching) return;
+  const band=bandFor(nearestNow==null?Infinity:nearestNow);
+  if(band){ beep(band[1]); beepTimer=setTimeout(tick,band[2]); }
+  else beepTimer=setTimeout(tick,1000); // 1 km 外安靜，每秒看一次
+}
+function updateSound(nearestM){ nearestNow=nearestM; }
+
+/* ===== 朝向 ===== */
+let heading=null, gpsHeading=null;
+let smoothH=null, shownH=null;
+function setHeading(h){ // 低通平滑 + 3 度死區，避免羅盤抖動亂轉
+  if(h==null||isNaN(h)) return; h=(h+360)%360;
+  if(smoothH==null) smoothH=h;
+  else { let d=((h-smoothH+540)%360)-180; smoothH=(smoothH+d*0.15+360)%360; }
+  heading=smoothH;
+  if(shownH!=null && Math.abs(((smoothH-shownH+540)%360)-180)<3) return;
+  shownH=smoothH;
+  const el=$('me'); el.classList.remove('nohead');
+  // 讓 CSS 過渡走最短路徑：累積角度而不是 0–360 跳
+  if(el._last==null) el._acc=smoothH; else el._acc+=((smoothH-el._last+540)%360)-180;
+  el._last=smoothH;
+  el.style.transform='rotate('+el._acc+'deg)';
+}
+function onOrient(e){
+  let h=null;
+  if(typeof e.webkitCompassHeading==='number') h=e.webkitCompassHeading;      // iOS
+  else if(e.absolute===true && typeof e.alpha==='number') h=360-e.alpha;    // Android
+  if(h!=null) setHeading(h);
+}
+async function startHeading(){ // 必須在點擊當下呼叫（iOS 權限）
+  try{
+    if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+      const r=await DeviceOrientationEvent.requestPermission(); if(r!=='granted') return;
+    }
+    window.addEventListener('deviceorientationabsolute',onOrient,true);
+    window.addEventListener('deviceorientation',onOrient,true);
+  }catch(e){}
+}
+function stopHeading(){ window.removeEventListener('deviceorientationabsolute',onOrient,true); window.removeEventListener('deviceorientation',onOrient,true); }
+
+/* ===== 畫面 ===== */
+const $=id=>document.getElementById(id);
+function render(forceOrder=false){
+  const blips=$('blips'); blips.innerHTML='';
+  const rows=STATUES.map(s=>({...s, d: me?distM(me,s):null, b: me?bearing(me,s):null}));
+  rows.sort((a,b)=>{
+    if(a.d==null) return a.id-b.id;
+    if(found.has(a.id)!==found.has(b.id)) return found.has(a.id)?1:-1;
+    return a.d-b.d;
+  });
+
+  fitMap();
+  /* 雷達點 */
+  if(me){
+    const R=rangeKm*1000, size=$('screen').clientWidth, half=size/2, rad=half-14;
+    rows.forEach(s=>{
+      if(found.has(s.id)) return; // 已找到的不再出現在雷達上
+      const inRange=s.d<=R;
+      let x,y;
+      if(inRange&&map&&mapReady){ const pt=map.project([s.lng,s.lat]); x=pt.x; y=pt.y; }
+      else { const r=inRange?(s.d/R)*rad:rad; x=half+r*Math.sin(s.b*Math.PI/180); y=half-r*Math.cos(s.b*Math.PI/180); }
+      const el=document.createElement('div');
+      el.className='blip'+(found.has(s.id)?' found':'')+(inRange?'':' edge')+(s.d<ALERT_M&&!found.has(s.id)?' near':'');
+      el.style.left=x+'px'; el.style.top=y+'px';
+      if(!inRange) el.style.transform=`rotate(${s.b}deg)`;
+      blips.appendChild(el);
+      if(inRange && s.id!==21){
+        const lb=document.createElement('div'); lb.className='label'+(found.has(s.id)?' found':'');
+        lb.textContent=s.name; lb.style.left=x+'px'; lb.style.top=y+'px'; blips.appendChild(lb);
+      }
+    });
+  }
+
+  /* 最近目標 */
+  const nearest=rows.find(s=>!found.has(s.id)&&s.d!=null);
+  if(nearest){
+    $('nearest').hidden=false;
+    $('nName').textContent=nearest.name+'　'+nearest.jp;
+    $('nWhere').textContent=nearest.place+(nearest.approx?'（約略位置）':'');
+    $('nDist').innerHTML=fmt(nearest.d)+'<small>'+dirText(nearest.b)+'</small>';
+  } else { $('nearest').hidden=true; }
+
+  /* 清單：只建立一次，之後就地更新文字；重新排序只在頁面靠近頂端時做，避免滑動中跳回頂端 */
+  const list=$('list');
+  rows.forEach(s=>{
+    let li=list.querySelector('li[data-id="'+s.id+'"]');
+    if(!li){
+      li=document.createElement('li'); li.dataset.id=s.id;
+      li.innerHTML=`<div class="no">${s.id}</div>
+        <div class="info"><div class="nm">${s.name}<span class="jp">${s.jp}</span></div><div class="pl">${s.place}${s.approx?'（約略）':''}</div></div>
+        <div class="d"></div>
+        <a class="go" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}">導航</a>
+        <button class="chk" data-id="${s.id}"></button>`;
+      list.appendChild(li);
+    }
+    li.classList.toggle('found',found.has(s.id));
+    li.querySelector('.d').textContent=s.d==null?'':fmt(s.d);
+    li.querySelector('.chk').textContent=found.has(s.id)?'已找到':'找到了';
+  });
+  const wantOrder=rows.map(s=>String(s.id)).join(','), haveOrder=[...list.children].map(li=>li.dataset.id).join(',');
+  if(wantOrder!==haveOrder && (window.scrollY<120 || forceOrder)){
+    rows.forEach(s=>list.appendChild(list.querySelector('li[data-id="'+s.id+'"]')));
+  }
+  $('foundCount').textContent=found.size;
+  return rows;
+}
+function dirText(b){ const n=['北','東北','東','東南','南','西南','西','西北']; return ' '+n[Math.round(b/45)%8]; }
+
+/* ===== 定位 ===== */
+function onPos(p){
+  me={lat:p.coords.latitude,lng:p.coords.longitude};
+  $('fixText').textContent='定位精度 ±'+Math.round(p.coords.accuracy)+' m';
+  if(heading==null && p.coords.heading!=null && p.coords.speed>1) setHeading(p.coords.heading);
+  $('status').className='status'; $('status').textContent='雷達運作中';
+  let nearestM=null;
+  STATUES.forEach(s=>{
+    if(found.has(s.id)) return;
+    const d=distM(me,s);
+    if(nearestM==null||d<nearestM) nearestM=d;
+    if(d<ALERT_M && !alerted.has(s.id)){ alerted.add(s.id); alarm(); toast(`發現 ${s.name}！就在 ${fmt(d)} 內`); }
+    if(d>ALERT_M*2) alerted.delete(s.id);
+  });
+  updateSound(nearestM);
+  const now=Date.now(); if(now-lastRender<3000) return; lastRender=now;
+  render();
+}
+function onErr(e){
+  $('status').className='status err';
+  $('status').textContent= e.code===1?'定位權限被拒絕，請在瀏覽器設定允許位置存取。':'暫時無法取得定位，請確認 GPS 已開啟。';
+}
+function toggle(){
+  if(watching!=null){
+    navigator.geolocation.clearWatch(watching); watching=null; stopAllSound(); nearestNow=null; stopHeading();
+    $('power').textContent='啟動雷達'; $('power').classList.remove('on');
+    $('status').textContent='雷達已停止'; return;
+  }
+  if(!navigator.geolocation){ onErr({code:2}); return; }
+  unlockAudio(); startHeading();
+  setTimeout(()=>beep('b2'),150);
+  $('power').textContent='停止'; $('power').classList.add('on');
+  $('status').textContent='定位中…';
+  watching=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:3000,timeout:15000});
+  clearTimeout(beepTimer); beepTimer=setTimeout(tick,1200);
+}
+
+/* ===== 事件 ===== */
+$('power').addEventListener('click',toggle);
+const R_MIN=0.5, R_MAX=30;
+function sliderToKm(v){ return R_MIN*Math.pow(R_MAX/R_MIN, v/100); }
+function applyRange(){
+  const km=sliderToKm(+$('rangeSlider').value);
+  rangeKm=km;
+  $('scaleText').textContent='範圍 '+(km<1?Math.round(km*1000)+' m':(km<10?km.toFixed(1):Math.round(km))+' km');
+  render();
+}
+$('rangeSlider').addEventListener('input',applyRange);
+$('list').addEventListener('click',e=>{
+  const b=e.target.closest('.chk'); if(!b) return;
+  const id=+b.dataset.id;
+  if(found.has(id)) found.delete(id); else { found.add(id); beep('found'); }
+  saveHash(); render(true); if(me){ let n=null; STATUES.forEach(s=>{ if(!found.has(s.id)){ const d=distM(me,s); if(n==null||d<n) n=d; } }); updateSound(n); }
+  if(found.size===21) toast('全 21 尊制霸！');
+});
+$('shareBtn').addEventListener('click',async()=>{
+  const url=location.href, text=`我在宮古島找到了 ${found.size}/21 尊守護君！`;
+  if(navigator.share){ try{ await navigator.share({title:'宮古島守護君雷達',text,url}); return; }catch(e){} }
+  try{ await navigator.clipboard.writeText(url); toast('連結已複製'); }catch(e){ prompt('複製這個連結：',url); }
+});
+$('resetBtn').addEventListener('click',()=>{ if(confirm('清除全部「已找到」紀錄？')){ found.clear(); alerted.clear(); saveHash(); render(); } });
+window.addEventListener('resize',render);
+let toastT; function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+
+saveHash(); applyRange();
+</script>
+</body>
+</html>
